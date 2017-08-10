@@ -20,6 +20,8 @@ repositories {
 
 dependencies {
     compile "org.jetbrains.kotlin:kotlin-stdlib-jre8:$kotlin_version"
+    compile 'org.apache.ivy:ivy:2.4.0'
+    compile 'org.eclipse.jetty.aggregate:jetty-all:9.4.6.v20170531'
 }
 
 compileKotlin {
