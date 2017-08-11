@@ -1,24 +1,17 @@
 package org.tiestvilee.easysm;
 
 import org.apache.ivy.Ivy;
-import org.apache.ivy.core.cache.ResolutionCacheManager;
-import org.apache.ivy.core.deliver.DeliverOptions;
 import org.apache.ivy.core.module.descriptor.DefaultDependencyDescriptor;
 import org.apache.ivy.core.module.descriptor.DefaultModuleDescriptor;
 import org.apache.ivy.core.module.descriptor.ModuleDescriptor;
 import org.apache.ivy.core.module.id.ModuleRevisionId;
-import org.apache.ivy.core.publish.PublishOptions;
-import org.apache.ivy.core.report.ArtifactDownloadReport;
 import org.apache.ivy.core.report.ResolveReport;
 import org.apache.ivy.core.resolve.IvyNode;
 import org.apache.ivy.core.resolve.ResolveOptions;
-import org.apache.ivy.core.resolve.ResolvedModuleRevision;
-import org.apache.ivy.core.retrieve.RetrieveOptions;
 import org.apache.ivy.core.settings.IvySettings;
 import org.apache.ivy.plugins.parser.ModuleDescriptorParser;
 import org.apache.ivy.plugins.parser.ModuleDescriptorParserRegistry;
 import org.apache.ivy.plugins.parser.xml.XmlModuleDescriptorWriter;
-import org.apache.ivy.plugins.report.XmlReportParser;
 import org.apache.ivy.plugins.repository.url.URLResource;
 import org.apache.ivy.util.DefaultMessageLogger;
 import org.apache.ivy.util.Message;
@@ -33,15 +26,9 @@ import org.apache.ivy.util.url.URLHandlerDispatcher;
 import org.apache.ivy.util.url.URLHandlerRegistry;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.net.MalformedURLException;
 import java.net.URL;
-import java.net.URLClassLoader;
-import java.util.*;
 
 public class Main {
     private static final int HELP_WIDTH = 80;
@@ -258,43 +245,20 @@ public class Main {
 
         for (IvyNode dependency : dependencies) {
             ModuleRevisionId id = dependency.getModuleRevision().getId();
+
+            IvyNode root = dependency.getRoot();
+            while (true) {
+                IvyNode oldRoot = root;
+                root = root.getRoot();
+                if (root == oldRoot) {
+                    break;
+                }
+            }
             System.out.println("mvn:" + id.getOrganisation() + ":" + id.getName() + ":jar:" + id.getRevision());
         }
 
         ivy.getLoggerEngine().popLogger();
         ivy.popContext();
-    }
-
-    /**
-     * Parses the <code>cp</code> option from the command line, and returns a list of {@link File}.
-     * <p>
-     * All the files contained in the returned List exist, non existing files are simply skipped
-     * with a warning.
-     * </p>
-     *
-     * @param line the command line in which the cp option should be parsed
-     * @return a List of files to include as extra classpath entries, or <code>null</code> if no cp
-     * option was provided.
-     */
-    private static List<File> getExtraClasspathFileList(CommandLine line) {
-        List<File> fileList = null;
-        if (line.hasOption("cp")) {
-            fileList = new ArrayList<>();
-            for (String cp : line.getOptionValues("cp")) {
-                StringTokenizer tokenizer = new StringTokenizer(cp, File.pathSeparator);
-                while (tokenizer.hasMoreTokens()) {
-                    String token = tokenizer.nextToken();
-                    File file = new File(token);
-                    if (file.exists()) {
-                        fileList.add(file);
-                    } else {
-                        Message.warn("Skipping extra classpath '" + file
-                            + "' as it does not exist.");
-                    }
-                }
-            }
-        }
-        return fileList;
     }
 
     private static IvySettings initSettings(CommandLine line, Ivy ivy)
@@ -339,98 +303,7 @@ public class Main {
         } else if (line.hasOption("error")) {
             ivy.getLoggerEngine().pushLogger(new DefaultMessageLogger(Message.MSG_ERR));
         } else {
-            ivy.getLoggerEngine().pushLogger(new DefaultMessageLogger(Message.MSG_INFO));
-        }
-    }
-
-    private static void outputCachePath(Ivy ivy, File cache, ModuleDescriptor md, String[] confs,
-                                        String outFile) {
-        try {
-            StringBuilder buf = new StringBuilder();
-            Collection<ArtifactDownloadReport> all = new LinkedHashSet<>();
-            ResolutionCacheManager cacheMgr = ivy.getResolutionCacheManager();
-            XmlReportParser parser = new XmlReportParser();
-            for (String conf : confs) {
-                String resolveId = ResolveOptions.getDefaultResolveId(md);
-                File report = cacheMgr.getConfigurationResolveReportInCache(resolveId, conf);
-                parser.parse(report);
-
-                all.addAll(Arrays.asList(parser.getArtifactReports()));
-            }
-            for (ArtifactDownloadReport artifact : all) {
-                if (artifact.getLocalFile() != null) {
-                    buf.append(artifact.getLocalFile().getCanonicalPath());
-                    buf.append(File.pathSeparator);
-                }
-            }
-
-            PrintWriter writer = new PrintWriter(new FileOutputStream(outFile));
-            if (buf.length() > 0) {
-                buf.setLength(buf.length() - File.pathSeparator.length());
-                writer.println(buf);
-            }
-            writer.close();
-            System.out.println("cachepath output to " + outFile);
-
-        } catch (Exception ex) {
-            throw new RuntimeException("impossible to build ivy cache path: " + ex.getMessage(), ex);
-        }
-    }
-
-    @SuppressWarnings("resource")
-    private static void invoke(Ivy ivy, File cache, ModuleDescriptor md, String[] confs,
-                               List<File> fileList, String mainclass, String[] args) {
-        List<URL> urls = new ArrayList<>();
-
-        // Add option cp (extra classpath) urls
-        if (fileList != null && fileList.size() > 0) {
-            for (File file : fileList) {
-                try {
-                    urls.add(file.toURI().toURL());
-                } catch (MalformedURLException e) {
-                    // Should not happen, just ignore.
-                }
-            }
-        }
-
-        try {
-            Collection<ArtifactDownloadReport> all = new LinkedHashSet<>();
-            ResolutionCacheManager cacheMgr = ivy.getResolutionCacheManager();
-            XmlReportParser parser = new XmlReportParser();
-            for (String conf : confs) {
-                String resolveId = ResolveOptions.getDefaultResolveId(md);
-                File report = cacheMgr.getConfigurationResolveReportInCache(resolveId, conf);
-                parser.parse(report);
-
-                all.addAll(Arrays.asList(parser.getArtifactReports()));
-            }
-            for (ArtifactDownloadReport artifact : all) {
-                if (artifact.getLocalFile() != null) {
-                    urls.add(artifact.getLocalFile().toURI().toURL());
-                }
-            }
-        } catch (Exception ex) {
-            throw new RuntimeException("impossible to build ivy cache path: " + ex.getMessage(), ex);
-        }
-
-        URLClassLoader classLoader = new URLClassLoader(urls.toArray(new URL[urls.size()]),
-            Main.class.getClassLoader());
-
-        try {
-            Class<?> c = classLoader.loadClass(mainclass);
-
-            Method mainMethod = c.getMethod("main", String[].class);
-
-            Thread.currentThread().setContextClassLoader(classLoader);
-            mainMethod.invoke(null, new Object[]{(args == null ? new String[0] : args)});
-        } catch (ClassNotFoundException cnfe) {
-            throw new RuntimeException("Could not find class: " + mainclass, cnfe);
-        } catch (SecurityException | NoSuchMethodException e) {
-            throw new RuntimeException("Could not find main method: " + mainclass, e);
-        } catch (IllegalAccessException e) {
-            throw new RuntimeException("No permissions to invoke main method: " + mainclass, e);
-        } catch (InvocationTargetException e) {
-            throw new RuntimeException("Unexpected exception invoking main method: " + mainclass, e);
+            ivy.getLoggerEngine().pushLogger(new DefaultMessageLogger(Message.MSG_ERR));
         }
     }
 
